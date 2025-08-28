@@ -6,48 +6,35 @@ import webbrowser
 
 # --- Importaciones de PyQt6 ---
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QTextEdit, QLineEdit, QPushButton, QTreeView,
-    QFileDialog, QMessageBox, QInputDialog, QSplitter, QFrame,
-    QToolBar, QStatusBar
+    QApplication, QMainWindow, QWidget, QVBoxLayout,
+    QTextEdit, QLabel, QFileDialog, QMessageBox,
+    QSplitter, QFrame, QToolBar, QStatusBar, QDockWidget,
+    QListWidget, QListWidgetItem, QInputDialog
 )
 from PyQt6.QtGui import (
-    QFont, QAction, QColor, QSyntaxHighlighter, QTextCharFormat, QIcon,
-    QFileSystemModel
+    QFont, QAction, QColor, QSyntaxHighlighter, QTextCharFormat, QIcon
 )
-from PyQt6.QtCore import QThread, pyqtSignal, QDir, Qt, QProcess
+from PyQt6.QtCore import Qt, QProcess, QUrl, QStandardPaths, QSize
 
-# --- Módulos Opcionales ---
+# --- Módulo Web Opcional ---
 try:
-    import google.generativeai as genai
+    from PyQt6.QtWebEngineWidgets import QWebEngineView  # type: ignore
+    WEB_ENGINE_AVAILABLE = True
 except ImportError:
-    genai = None
+    WEB_ENGINE_AVAILABLE = False
 
-try:
-    import qtawesome as qta
-except ImportError:
-    qta = None
-
-# --- Hojas de Estilo (QSS) para los Temas ---
+# --- Estilos ---
 LIGHT_STYLE_SHEET = """
     QMainWindow, QToolBar { background-color: #f0f0f0; }
-    QTextEdit, QTreeView, QLineEdit { background-color: #ffffff; border: 1px solid #cccccc; border-radius: 6px; font-size: 11pt; color: #3d3d3d; }
-    QTreeView { padding: 5px; }
-    QPushButton { background-color: #e8e7e6; border: 1px solid #b7b5b3; border-radius: 6px; padding: 8px; font-size: 10pt; color: #3d3d3d; }
-    QSplitter::handle { background-color: #d0ced9; }
-    QFrame#SidePanel { background-color: #e8e7e6; border-right: 1px solid #cccccc; }
-    #SendButton { background-color: #3584e4; color: white; border: none; }
-    #TerminalOutput { background-color: #ffffff; color: #3d3d3d; font-family: 'Monospace'; }
+    QTextEdit { background-color: #ffffff; border: 1px solid #cccccc; border-radius: 6px; font-size: 11pt; color: #3d3d3d; }
+    QLabel#ProjectsLabel { font-size: 14pt; font-weight: bold; color: #1a4fa3; padding: 6px; }
+    QListWidget { border: none; }
 """
 DARK_STYLE_SHEET = """
     QMainWindow, QToolBar { background-color: #2b2b2b; }
-    QTextEdit, QTreeView, QLineEdit { background-color: #3c3f41; border: 1px solid #555555; border-radius: 6px; font-size: 11pt; color: #dcdcdc; }
-    QTreeView { padding: 5px; }
-    QPushButton { background-color: #4a4d50; border: 1px solid #666666; border-radius: 6px; padding: 8px; font-size: 10pt; color: #dcdcdc; }
-    QSplitter::handle { background-color: #555555; }
-    QFrame#SidePanel { background-color: #313335; border-right: 1px solid #444444; }
-    #SendButton { background-color: #0d61a9; color: white; border: none; }
-    #TerminalOutput { background-color: #2b2b2b; color: #dcdcdc; font-family: 'Monospace'; border-top: 1px solid #444444; }
+    QTextEdit { background-color: #3c3f41; border: 1px solid #555555; border-radius: 6px; font-size: 11pt; color: #dcdcdc; }
+    QLabel#ProjectsLabel { font-size: 14pt; font-weight: bold; color: #4a90e2; padding: 6px; }
+    QListWidget { border: none; }
 """
 
 # --- Resaltador de Sintaxis ---
@@ -55,314 +42,314 @@ class GenericSyntaxHighlighter(QSyntaxHighlighter):
     def __init__(self, parent):
         super().__init__(parent)
         self.highlighting_rules = []
-        keyword_format = QTextCharFormat(); keyword_format.setForeground(QColor("#569cd6")); keyword_format.setFontWeight(QFont.Weight.Bold)
-        keywords = ["and", "as", "assert", "break", "class", "continue", "def", "del", "elif", "else", "except", "False", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "None", "nonlocal", "not", "or", "pass", "raise", "return", "True", "try", "while", "with", "yield"]
+
+        keyword_format = QTextCharFormat()
+        keyword_format.setForeground(QColor("#569cd6"))
+        keyword_format.setFontWeight(QFont.Weight.Bold)
+        keywords = ["and","as","assert","break","class","continue","def","del","elif","else",
+                    "except","False","finally","for","from","global","if","import","in",
+                    "is","lambda","None","nonlocal","not","or","pass","raise","return",
+                    "True","try","while","with","yield"]
         self.highlighting_rules += [(fr'\b{word}\b', keyword_format) for word in keywords]
-        string_format = QTextCharFormat(); string_format.setForeground(QColor("#ce9178"))
-        self.highlighting_rules.append((r'"[^"\\]*(\\.[^"\\]*)*"', string_format)); self.highlighting_rules.append((r"'[^'\\]*(\\.[^'\\]*)*'", string_format))
-        comment_format = QTextCharFormat(); comment_format.setForeground(QColor("#6a9955")); self.highlighting_rules.append((r'#[^\n]*', comment_format))
-        tag_format = QTextCharFormat(); tag_format.setForeground(QColor("#4ec9b0")); self.highlighting_rules.append((r'<[a-zA-Z0-9_!/]+', tag_format)); self.highlighting_rules.append((r'>', tag_format))
+
+        string_format = QTextCharFormat()
+        string_format.setForeground(QColor("#ce9178"))
+        self.highlighting_rules.append((r'"[^"\\]*(\\.[^"\\]*)*"', string_format))
+        self.highlighting_rules.append((r"'[^'\\]*(\\.[^'\\]*)*'", string_format))
+
+        comment_format = QTextCharFormat()
+        comment_format.setForeground(QColor("#6a9955"))
+        self.highlighting_rules.append((r'#[^\n]*', comment_format))
+
     def highlightBlock(self, text):
-        for pattern, format in self.highlighting_rules:
-            for match in re.finditer(pattern, text): self.setFormat(match.start(), match.end() - match.start(), format)
+        for pattern, fmt in self.highlighting_rules:
+            for match in re.finditer(pattern, text):
+                self.setFormat(match.start(), match.end() - match.start(), fmt)
 
-# --- Hilos de Tareas ---
-class CodeExecutorThread(QThread):
-    output_ready = pyqtSignal(str)
-    def __init__(self, command_parts):
-        super().__init__()
-        self.command_parts = command_parts
-    def run(self):
-        process = QProcess()
-        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        process.readyReadStandardOutput.connect(lambda: self.output_ready.emit(process.readAllStandardOutput().data().decode(errors='ignore')))
-        process.start(self.command_parts[0], self.command_parts[1:])
-        process.waitForFinished(-1)
-
-class GeminiThread(QThread):
-    response_ready = pyqtSignal(str); error_occurred = pyqtSignal(str)
-    def __init__(self, prompt, model): super().__init__(); self.prompt = prompt; self.model = model
-    def run(self):
-        if not self.model: self.error_occurred.emit("El modelo de Gemini no está configurado."); return
-        try:
-            response = self.model.generate_content(self.prompt)
-            self.response_ready.emit(response.text.strip())
-        except Exception as e: self.error_occurred.emit(f"Error en la API de Gemini: {e}")
-
-# --- Ventana Principal ---
+# --- IDE Principal ---
 class SanixIDE(QMainWindow):
-    EDIT_KEYWORDS = ['edit', 'edita', 'corrige', 'mejora', 'optimiza', 'refactoriza', 'añade', 'agrega', 'cambia', 'modifica', 'traduce', 'documenta', 'explica']
     def __init__(self):
         super().__init__()
         self.current_file_path = None
-        self.api_configured = False
-        self.gemini_model = None
+        self.current_project_path = None
         self.is_dark_mode = False
         self.is_terminal_visible = False
+        self.executor_process = None
 
         self.setWindowTitle("SANIX IDE")
         self.setGeometry(100, 100, 1400, 900)
 
+        self.workspace_path = self._setup_workspace()
         self.create_widgets()
         self.create_layout()
         self.create_connections()
         self.toggle_theme()
 
-        if genai:
-            self.prompt_for_api_key()
-
-    def get_icon(self, name):
-        icon_color = '#dcdcdc' if self.is_dark_mode else '#3d3d3d'
-        return qta.icon(name, color=icon_color) if qta else QIcon()
+    def _setup_workspace(self):
+        docs_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        workspace = os.path.join(docs_path, "SANIX_IDE_Projects")
+        os.makedirs(workspace, exist_ok=True)
+        return workspace
 
     def create_widgets(self):
+        # Toolbar
         self.toolbar = QToolBar("Main Toolbar")
         self.addToolBar(self.toolbar)
-
         self.action_new_file = QAction("Nuevo", self)
         self.action_save = QAction("Guardar", self)
         self.action_run = QAction("Ejecutar", self)
-        self.action_api = QAction("API Gemini", self)
+        self.action_toggle_gemini = QAction("Gemini", self)
+        self.action_toggle_chatgpt = QAction("ChatGPT", self)
         self.action_toggle_terminal = QAction("Terminal", self)
         self.action_toggle_theme = QAction("Tema", self)
-        self.toolbar.addActions([self.action_new_file, self.action_save, self.action_run, self.action_api, self.action_toggle_terminal, self.action_toggle_theme])
-        
-        self.folder_button = QPushButton(" Abrir Carpeta Local")
-        self.file_tree = QTreeView()
-        self.file_system_model = QFileSystemModel()
-        self.file_tree.setModel(self.file_system_model)
-        self.file_tree.setRootIndex(self.file_system_model.index(QDir.homePath()))
-        for i in range(1, self.file_system_model.columnCount()):
-            self.file_tree.setColumnHidden(i, True)
-        self.file_tree.setHeaderHidden(True)
+        self.toolbar.addActions([
+            self.action_new_file, self.action_save, self.action_run,
+            self.action_toggle_gemini, self.action_toggle_chatgpt,
+            self.action_toggle_terminal, self.action_toggle_theme
+        ])
 
+        # Menú de proyectos
+        self.projects_label = QLabel("Tus Proyectos")
+        self.projects_label.setObjectName("ProjectsLabel")
+        self.project_menu = QListWidget()
+        self.project_menu.setViewMode(QListWidget.ViewMode.IconMode)
+        self.project_menu.setIconSize(QSize(64, 64))
+        self.project_menu.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.project_menu.setSpacing(20)
+        self.load_projects()
+
+        # Editor
         self.editor = QTextEdit()
-        self.editor.setFont(QFont("Monospace", 11))
+        self.editor.setFont(QFont("Courier", 11))
         self.highlighter = GenericSyntaxHighlighter(self.editor.document())
+        self.editor.textChanged.connect(self.auto_format_live)  # Formato en vivo
 
+        # Terminal
         self.terminal = QTextEdit()
-        self.terminal.setObjectName("TerminalOutput")
         self.terminal.setReadOnly(True)
+        self.terminal.hide()
 
-        self.prompt_input = QLineEdit()
-        self.prompt_input.setPlaceholderText("Crea o mejora código con IA...")
-        self.send_button = QPushButton()
-        self.send_button.setObjectName("SendButton")
-
+        # Status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
 
+        # Web docks (IA)
+        if WEB_ENGINE_AVAILABLE:
+            self.chatgpt_dock = QDockWidget("Asistente ChatGPT", self)
+            self.chatgpt_web = QWebEngineView()
+            self.chatgpt_web.setUrl(QUrl("https://chat.openai.com/"))
+            self.chatgpt_dock.setWidget(self.chatgpt_web)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.chatgpt_dock)
+            self.chatgpt_dock.hide()
+
+            self.gemini_dock = QDockWidget("Asistente Gemini", self)
+            self.gemini_web = QWebEngineView()
+            self.gemini_web.setUrl(QUrl("https://gemini.google.com/"))
+            self.gemini_dock.setWidget(self.gemini_web)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.gemini_dock)
+            self.gemini_dock.hide()
+
+    def load_projects(self):
+        self.project_menu.clear()
+        new_item = QListWidgetItem(QIcon.fromTheme("list-add"), "+")
+        new_item.setToolTip("Nuevo Proyecto")
+        self.project_menu.addItem(new_item)
+        for name in os.listdir(self.workspace_path):
+            path = os.path.join(self.workspace_path, name)
+            if os.path.isdir(path):
+                item = QListWidgetItem(QIcon.fromTheme("folder"), name)
+                self.project_menu.addItem(item)
+
+    def show_project_files(self, project_path):
+        self.project_menu.clear()
+        back_item = QListWidgetItem("⬅ Volver")
+        self.project_menu.addItem(back_item)
+
+        for filename in os.listdir(project_path):
+            path = os.path.join(project_path, filename)
+            if os.path.isfile(path):
+                icon = QIcon.fromTheme("text-x-generic")
+                file_item = QListWidgetItem(icon, filename)
+                file_item.setToolTip(path)
+                self.project_menu.addItem(file_item)
+
+        self.current_project_path = project_path
+
     def create_layout(self):
-        side_panel = QFrame(); side_panel.setObjectName("SidePanel")
-        side_panel_layout = QVBoxLayout(side_panel)
-        side_panel.setFixedWidth(280)
-        side_panel_layout.addWidget(self.folder_button)
-        side_panel_layout.addWidget(self.file_tree)
+        left_panel = QFrame()
+        layout = QVBoxLayout(left_panel)
+        layout.addWidget(self.projects_label)
+        layout.addWidget(self.project_menu)
 
-        right_panel = QWidget()
-        right_panel_layout = QVBoxLayout(right_panel)
-        right_panel_layout.setContentsMargins(0,0,0,0)
-        right_panel_layout.setSpacing(0)
-
-        self.editor_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.editor_splitter.addWidget(self.editor)
-        self.editor_splitter.addWidget(self.terminal)
-        self.editor_splitter.setSizes([700, 200])
-
-        prompt_layout = QHBoxLayout()
-        prompt_layout.addWidget(self.prompt_input)
-        prompt_layout.addWidget(self.send_button)
-
-        right_panel_layout.addWidget(self.editor_splitter)
-        right_panel_layout.addLayout(prompt_layout)
-        
-        self.terminal.hide()
+        right_panel = QSplitter(Qt.Orientation.Vertical)
+        right_panel.addWidget(self.editor)
+        right_panel.addWidget(self.terminal)
+        right_panel.setSizes([700, 200])
 
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.addWidget(side_panel)
+        main_splitter.addWidget(left_panel)
         main_splitter.addWidget(right_panel)
-        main_splitter.setSizes([280, 1120])
+        main_splitter.setSizes([400, 1000])
+
         self.setCentralWidget(main_splitter)
 
     def create_connections(self):
         self.action_new_file.triggered.connect(self.new_file)
         self.action_save.triggered.connect(self.save_file)
         self.action_run.triggered.connect(self.execute_or_open_file)
-        self.action_api.triggered.connect(self.prompt_for_api_key)
-        self.action_toggle_terminal.triggered.connect(self.toggle_terminal)
         self.action_toggle_theme.triggered.connect(self.toggle_theme)
-        self.folder_button.clicked.connect(self.open_local_folder)
-        self.file_tree.clicked.connect(self.file_selected)
-        self.send_button.clicked.connect(self.generate_or_edit_code)
+        self.action_toggle_terminal.triggered.connect(self.toggle_terminal)
+        if WEB_ENGINE_AVAILABLE:
+            self.action_toggle_gemini.triggered.connect(self.toggle_gemini_panel)
+            self.action_toggle_chatgpt.triggered.connect(self.toggle_chatgpt_panel)
+        self.project_menu.itemClicked.connect(self.project_menu_clicked)
 
-    def toggle_theme(self):
-        self.is_dark_mode = not self.is_dark_mode
-        self.setStyleSheet(DARK_STYLE_SHEET if self.is_dark_mode else LIGHT_STYLE_SHEET)
-        self.update_icons()
+    # --- Menú de proyectos y archivos ---
+    def project_menu_clicked(self, item):
+        if item.text() == "+":
+            name, ok = QInputDialog.getText(self, "Nuevo Proyecto", "Nombre del proyecto:")
+            if ok and name.strip():
+                path = os.path.join(self.workspace_path, name.strip())
+                os.makedirs(path, exist_ok=True)
+                self.load_projects()
+        elif item.text() == "⬅ Volver":
+            self.load_projects()
+        else:
+            file_path = item.toolTip()
+            if file_path and os.path.isfile(file_path):
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        self.editor.setPlainText(f.read())
+                    self.current_file_path = file_path
+                    lang = self.detect_language(file_path)
+                    self.setWindowTitle(f"SANIX IDE - {os.path.basename(file_path)} [{lang}]")
+                except Exception as e:
+                    self.show_message("Error", f"No se pudo abrir el archivo: {e}")
+            else:
+                project_path = os.path.join(self.workspace_path, item.text())
+                if os.path.isdir(project_path):
+                    self.show_project_files(project_path)
 
-    def update_icons(self):
-        self.action_new_file.setIcon(self.get_icon('fa5s.file'))
-        self.action_save.setIcon(self.get_icon('fa5s.save'))
-        self.action_run.setIcon(self.get_icon('fa5s.play'))
-        self.action_api.setIcon(self.get_icon('fa5s.key'))
-        self.action_toggle_terminal.setIcon(self.get_icon('fa5s.terminal'))
-        self.action_toggle_theme.setIcon(self.get_icon('fa5s.sun') if self.is_dark_mode else self.get_icon('fa5s.moon'))
-        self.folder_button.setIcon(self.get_icon('fa5s.folder-open'))
-        self.send_button.setIcon(qta.icon('fa5s.arrow-right', color='white') if qta else QIcon())
-    
-    def toggle_terminal(self):
-        self.is_terminal_visible = not self.is_terminal_visible
-        self.terminal.setVisible(self.is_terminal_visible)
+    # --- IA ---
+    def toggle_chatgpt_panel(self):
+        self.chatgpt_dock.setVisible(not self.chatgpt_dock.isVisible())
+        if self.chatgpt_dock.isVisible():
+            self.gemini_dock.hide()
+
+    def toggle_gemini_panel(self):
+        self.gemini_dock.setVisible(not self.gemini_dock.isVisible())
+        if self.gemini_dock.isVisible():
+            self.chatgpt_dock.hide()
+
+    # --- Archivo y editor ---
+    def detect_language(self, file_path):
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+        if ext == ".py": return "Python"
+        if ext in [".html", ".htm"]: return "HTML"
+        if ext == ".js": return "JavaScript"
+        if ext == ".css": return "CSS"
+        return "Texto plano"
+
+    def normalize_indentation(self, text):
+        return text.replace("\t", "    ")
+
+    def auto_format_code(self, code, language):
+        code = self.normalize_indentation(code)
+        try:
+            if language == "Python":
+                import black
+                return black.format_str(code, mode=black.Mode())
+            elif language in ["JavaScript", "HTML", "CSS"]:
+                import jsbeautifier
+                return jsbeautifier.beautify(code)
+        except Exception as e:
+            self.statusBar.showMessage(f"No se pudo autoformatear: {e}", 3000)
+        return code
+
+    def auto_format_live(self):
+        if not self.current_file_path:
+            return
+        lang = self.detect_language(self.current_file_path)
+        cursor = self.editor.textCursor()
+        pos = cursor.position()
+        raw_code = self.editor.toPlainText()
+        formatted = self.auto_format_code(raw_code, lang)
+        if formatted != raw_code:
+            self.editor.blockSignals(True)
+            self.editor.setPlainText(formatted)
+            cursor.setPosition(min(pos, len(formatted)))
+            self.editor.setTextCursor(cursor)
+            self.editor.blockSignals(False)
 
     def new_file(self):
-        if not self.check_for_unsaved_changes(): return
         self.editor.clear()
         self.current_file_path = None
         self.setWindowTitle("SANIX IDE - Untitled")
         self.editor.document().setModified(False)
-        self.statusBar.showMessage("Nuevo archivo creado.", 3000)
-    
-    def file_selected(self, index):
-        if not self.check_for_unsaved_changes(): return
-        file_path = self.file_system_model.filePath(index)
-        if os.path.isfile(file_path):
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    self.editor.setPlainText(f.read())
-                self.current_file_path = file_path
-                self.setWindowTitle(f"SANIX IDE - {os.path.basename(file_path)}")
-                self.editor.document().setModified(False)
-            except Exception as e:
-                self.show_message("Error de Lectura", f"No se pudo leer el archivo:\n{e}")
-    
-    def check_for_unsaved_changes(self):
-        if not self.editor.document().isModified(): return True
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Warning)
-        msg_box.setText(f"¿Quieres guardar los cambios en {os.path.basename(self.current_file_path or 'Untitled')}?")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
-        msg_box.setDefaultButton(QMessageBox.StandardButton.Save)
-        reply = msg_box.exec()
-        if reply == QMessageBox.StandardButton.Save: return self.save_file()
-        elif reply == QMessageBox.StandardButton.Cancel: return False
-        return True
-    
-    def save_file(self):
-        path_to_save = self.current_file_path
-        if not path_to_save:
-            path_to_save, _ = QFileDialog.getSaveFileName(self, "Guardar Archivo", "", "Todos los Archivos (*)")
-        if path_to_save:
-            try:
-                with open(path_to_save, 'w', encoding='utf-8') as f:
-                    f.write(self.editor.toPlainText())
-                self.current_file_path = path_to_save
-                self.statusBar.showMessage(f"Archivo guardado: {path_to_save}", 3000)
-                self.setWindowTitle(f"SANIX IDE - {os.path.basename(path_to_save)}")
-                self.editor.document().setModified(False)
-                return True
-            except Exception as e:
-                self.show_message("Error de Escritura", f"No se pudo guardar el archivo:\n{e}")
-                return False
-        return False
 
-    def open_local_folder(self):
-        if not self.check_for_unsaved_changes(): return
-        folder_path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta Local")
-        if folder_path:
-            self.file_tree.setModel(self.file_system_model)
-            self.file_tree.setRootIndex(self.file_system_model.index(folder_path))
+    def save_file(self):
+        if not self.current_project_path:
+            self.show_message("Error", "Debes seleccionar un proyecto antes de guardar.")
+            return False
+
+        if not self.current_file_path:
+            name, ok = QInputDialog.getText(self, "Guardar archivo", "Nombre del archivo:")
+            if not ok or not name.strip():
+                return False
+            self.current_file_path = os.path.join(self.current_project_path, name.strip())
+
+        lang = self.detect_language(self.current_file_path)
+        raw_code = self.editor.toPlainText()
+        formatted_code = self.auto_format_code(raw_code, lang)
+        with open(self.current_file_path, 'w', encoding='utf-8') as f:
+            f.write(formatted_code)
+        self.setWindowTitle(f"SANIX IDE - {os.path.basename(self.current_file_path)} [{lang}]")
+        self.editor.document().setModified(False)
+        self.statusBar.showMessage(f"Archivo guardado en {self.current_project_path}", 3000)
+        return True
 
     def execute_or_open_file(self):
         if not self.current_file_path:
-            self.show_message("Archivo no guardado", "Guarda el archivo antes de ejecutarlo o abrirlo.")
+            self.show_message("Archivo no guardado", "Guarda el archivo antes de ejecutar.")
             return
         self.save_file()
-        _root, extension = os.path.splitext(self.current_file_path)
+        _, extension = os.path.splitext(self.current_file_path)
         extension = extension.lower()
-        if extension in ['.py', '.js']:
-            self.run_in_app_terminal([sys.executable if extension == '.py' else 'node', self.current_file_path])
-        elif extension in ['.html', '.htm', '.xml', '.svg']:
-            self.open_in_browser()
-        else:
-            self.open_with_default_app()
+        if extension == ".py":
+            self.run_in_app_terminal([sys.executable, self.current_file_path])
+        elif extension == ".js":
+            self.run_in_app_terminal(["node", self.current_file_path])
+        elif extension in [".html", ".htm"]:
+            webbrowser.open("file:///" + os.path.abspath(self.current_file_path))
 
     def run_in_app_terminal(self, command_parts):
         if not self.is_terminal_visible:
             self.toggle_terminal()
         self.terminal.clear()
         self.terminal.append(f"> {' '.join(command_parts)}\n")
-        self.executor_thread = CodeExecutorThread(command_parts)
-        self.executor_thread.output_ready.connect(lambda out: self.terminal.insertPlainText(out))
-        self.executor_thread.finished.connect(lambda: self.terminal.append("\n> Proceso finalizado."))
-        self.executor_thread.start()
-    
-    def generate_or_edit_code(self):
-        if not self.api_configured:
-            self.show_message("API no configurada", "Configura tu API Key para usar la IA.")
-            return
-        user_prompt = self.prompt_input.text().lower()
-        current_code = self.editor.toPlainText()
-        if not user_prompt: return
-        is_edit_request = any(keyword in user_prompt for keyword in self.EDIT_KEYWORDS) and current_code.strip()
-        prompt = (f"Realiza la siguiente acción en el código: '{user_prompt}'.\n\nCódigo actual:\n```\n{current_code}\n```\n\nDevuelve únicamente el bloque de código completo y modificado." if is_edit_request else f"Genera un fragmento de código para: '{user_prompt}'. Responde únicamente con el bloque de código.")
-        self.statusBar.showMessage("Procesando con Gemini...")
-        self.run_gemini_task(prompt, self.replace_editor_content if is_edit_request else self.insert_editor_content)
+        self.executor_process = QProcess(self)
+        self.executor_process.readyReadStandardOutput.connect(
+            lambda: self.terminal.insertPlainText(
+                self.executor_process.readAllStandardOutput().data().decode(errors='ignore')))
+        self.executor_process.readyReadStandardError.connect(
+            lambda: self.terminal.insertPlainText(
+                self.executor_process.readAllStandardError().data().decode(errors='ignore')))
+        self.executor_process.start(command_parts[0], command_parts[1:])
 
-    def run_gemini_task(self, prompt, on_complete_slot):
-        self.gemini_thread = GeminiThread(prompt, self.gemini_model)
-        self.gemini_thread.response_ready.connect(on_complete_slot)
-        self.gemini_thread.error_occurred.connect(lambda err: self.show_message("Error de IA", err))
-        self.gemini_thread.start()
-    
-    def insert_editor_content(self, code):
-        self.editor.textCursor().insertText(self.clean_response_code(code))
-        self.statusBar.showMessage("Código nuevo insertado.", 3000)
-        self.prompt_input.clear()
-    
-    def replace_editor_content(self, code):
-        self.editor.setPlainText(self.clean_response_code(code))
-        self.statusBar.showMessage("Código actualizado por la IA.", 3000)
-        self.prompt_input.clear()
-    
-    def clean_response_code(self, code):
-        match = re.search(r'```(?:\w*\n)?(.*)```', code, re.DOTALL)
-        return match.group(1).strip() if match else code.strip()
-    
-    def open_in_browser(self):
-        try:
-            file_url = 'file:///' + os.path.abspath(self.current_file_path).replace('\\', '/')
-            webbrowser.open(file_url)
-            self.statusBar.showMessage(f"Abriendo {os.path.basename(self.current_file_path)} en el navegador...", 3000)
-        except Exception as e: self.show_message("Error", f"No se pudo abrir el archivo en el navegador: {e}")
-    
-    def open_with_default_app(self):
-        self.statusBar.showMessage(f"Intentando abrir {os.path.basename(self.current_file_path)}...", 3000)
-        try:
-            if sys.platform == "win32": os.startfile(self.current_file_path)
-            elif sys.platform == "darwin": subprocess.run(["open", self.current_file_path])
-            else: subprocess.run(["xdg-open", self.current_file_path])
-        except Exception as e: self.show_message("Error", f"No se pudo abrir el archivo.\nError: {e}")
-    
-    def prompt_for_api_key(self):
-        if not genai: self.show_message("Función no disponible", "'google-generativeai' no está instalado."); return
-        api_key, ok = QInputDialog.getText(self, "Configurar API Key", "Introduce tu API Key de Gemini:", QLineEdit.EchoMode.Password)
-        if ok and api_key: self.configure_gemini(api_key)
-    
-    def configure_gemini(self, api_key):
-        try:
-            genai.configure(api_key=api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            self.gemini_model.generate_content("test", request_options={'timeout': 10})
-            self.api_configured = True
-            self.statusBar.showMessage("API de Gemini configurada correctamente.", 5000)
-        except Exception as e:
-            self.api_configured = False
-            self.gemini_model = None
-            self.show_message("Error de API", f"No se pudo configurar la API.\nError: {e}")
-    
+    # --- Apariencia ---
+    def toggle_theme(self):
+        self.is_dark_mode = not self.is_dark_mode
+        self.setStyleSheet(DARK_STYLE_SHEET if self.is_dark_mode else LIGHT_STYLE_SHEET)
+
+    def toggle_terminal(self):
+        self.is_terminal_visible = not self.is_terminal_visible
+        self.terminal.setVisible(self.is_terminal_visible)
+
     def show_message(self, title, message):
         QMessageBox.information(self, title, message)
 
+# --- Punto de entrada ---
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     editor = SanixIDE()
